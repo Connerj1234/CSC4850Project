@@ -1,4 +1,3 @@
-````markdown
 ## **Classification Task**
 
 ### **1. Overview**
@@ -20,7 +19,7 @@ All logic is implemented in:
 
 ```text
 classification/main_classification.py
-````
+```
 
 ---
 
@@ -324,6 +323,3 @@ This command will:
 * Generate the prediction files in `classification/results/`
 
 These cross validated accuracies and selected models are then used in the written report to justify model choices for each dataset.
-
-```
-```
