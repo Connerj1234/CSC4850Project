@@ -5,12 +5,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import LinearSVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
-
-
-# Set this to your last name or group name
-LAST_NAME = "Jamison"  # change if needed
-
 
 def get_base_dir() -> Path:
     """
@@ -34,7 +32,6 @@ def load_dataset(dataset_id: int):
     train_label_path = base / f"TrainLabel{dataset_id}.txt"
     test_data_path = base / f"TestData{dataset_id}.txt"
 
-    # Load data; files are whitespace separated
     X_train = np.loadtxt(train_data_path)
     y_train = np.loadtxt(train_label_path).astype(int)
     X_test = np.loadtxt(test_data_path)
@@ -42,40 +39,95 @@ def load_dataset(dataset_id: int):
     return X_train, y_train, X_test
 
 
-def build_model():
+def get_model_configs(dataset_id: int):
     """
-    Build a pipeline:
-      - Impute missing values (1e99) using feature-wise mean
-      - Standardize features
-      - Logistic Regression classifier
+    Define model pipelines and hyperparameter grids for this dataset.
 
-    Wrapped in a GridSearchCV to tune regularization strength C.
+    We always:
+      - Impute missing values (1e99) with mean
+      - For linear models and MLP: standardize features
+
+    Returns:
+        Dict of model_name -> (pipeline, param_grid)
     """
-    pipeline = Pipeline(
+    imputer = SimpleImputer(missing_values=1e99, strategy="mean")
+
+    # Some light dataset specific tweaks
+    if dataset_id in (1, 2):
+        # Small sample, high dimensional: keep models simpler and heavily regularized
+        mlp_hidden = (50,)
+        rf_n_estimators = 100
+        rf_max_depth = 5
+    else:
+        # More samples, fewer features: can afford slightly richer models
+        mlp_hidden = (128, 64)
+        rf_n_estimators = 200
+        rf_max_depth = None
+
+    models = {}
+
+    # 1. Logistic Regression
+    logreg_pipeline = Pipeline(
         steps=[
-            ("imputer", SimpleImputer(missing_values=1e99, strategy="mean")),
+            ("imputer", imputer),
             ("scaler", StandardScaler()),
             ("clf", LogisticRegression(max_iter=1000)),
         ]
     )
-
-    # Small grid for C; you can expand this if you want more tuning
-    param_grid = {
+    logreg_param_grid = {
         "clf__C": [0.01, 0.1, 1.0, 10.0],
     }
+    models["logistic_regression"] = (logreg_pipeline, logreg_param_grid)
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    grid = GridSearchCV(
-        estimator=pipeline,
-        param_grid=param_grid,
-        scoring="accuracy",
-        cv=cv,
-        n_jobs=-1,
-        verbose=0,
+    # 2. Linear SVM
+    svm_pipeline = Pipeline(
+        steps=[
+            ("imputer", imputer),
+            ("scaler", StandardScaler()),
+            ("clf", LinearSVC(max_iter=5000)),
+        ]
     )
+    svm_param_grid = {
+        "clf__C": [0.01, 0.1, 1.0, 10.0],
+    }
+    models["linear_svm"] = (svm_pipeline, svm_param_grid)
 
-    return grid
+    # 3. Random Forest (trees do not need scaling)
+    rf_pipeline = Pipeline(
+        steps=[
+            ("imputer", imputer),
+            ("clf", RandomForestClassifier(n_estimators=rf_n_estimators, random_state=42)),
+        ]
+    )
+    rf_param_grid = {
+        "clf__max_depth": [rf_max_depth, 10, 20] if rf_max_depth is None else [rf_max_depth, 3, 7],
+        "clf__min_samples_split": [2, 5],
+    }
+    models["random_forest"] = (rf_pipeline, rf_param_grid)
+
+    # 4. MLP (neural network)
+    mlp_pipeline = Pipeline(
+        steps=[
+            ("imputer", imputer),
+            ("scaler", StandardScaler()),
+            (
+                "clf",
+                MLPClassifier(
+                    hidden_layer_sizes=mlp_hidden,
+                    activation="relu",
+                    solver="adam",
+                    max_iter=400,
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+    mlp_param_grid = {
+        "clf__alpha": [0.0005, 0.001, 0.01],
+    }
+    models["mlp"] = (mlp_pipeline, mlp_param_grid)
+
+    return models
 
 
 def save_predictions(preds: np.ndarray, dataset_id: int):
@@ -86,7 +138,7 @@ def save_predictions(preds: np.ndarray, dataset_id: int):
     results_dir = base / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = f"{LAST_NAME}Classification{dataset_id}.txt"
+    filename = f"JamisonClassification{dataset_id}.txt"
     out_path = results_dir / filename
 
     with out_path.open("w") as f:
@@ -98,11 +150,12 @@ def save_predictions(preds: np.ndarray, dataset_id: int):
 
 def run_dataset(dataset_id: int):
     """
-    Run the full pipeline for a single dataset:
+    Run full model selection for a single dataset:
       - Load data
-      - Fit GridSearchCV
-      - Print best params and CV score
-      - Refit best model on all training data
+      - For each candidate model:
+          * Run GridSearchCV with 5 fold stratified CV
+          * Track best model and score
+      - Refit best overall model on all training data
       - Predict on test data
       - Save predictions
     """
@@ -112,22 +165,46 @@ def run_dataset(dataset_id: int):
     X_train, y_train, X_test = load_dataset(dataset_id)
     print(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
-    model = build_model()
+    model_configs = get_model_configs(dataset_id)
 
-    # Fit with cross validation to select best C
-    model.fit(X_train, y_train)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    print(f"Best params for dataset {dataset_id}: {model.best_params_}")
-    print(
-        f"Best CV accuracy for dataset {dataset_id}: "
-        f"{model.best_score_:.4f}"
-    )
+    best_overall = None
+    best_overall_name = None
+    best_overall_score = -np.inf
 
-    # Best estimator already refit on full training data by default
-    best_model = model.best_estimator_
+    for name, (pipeline, param_grid) in model_configs.items():
+        print(f"\nRunning model: {name}")
 
-    # Predict on test set
-    y_pred = best_model.predict(X_test)
+        grid = GridSearchCV(
+            estimator=pipeline,
+            param_grid=param_grid,
+            scoring="accuracy",
+            cv=cv,
+            n_jobs=-1,
+            verbose=0,
+        )
+
+        grid.fit(X_train, y_train)
+
+        print(f"  Best params: {grid.best_params_}")
+        print(f"  Best CV accuracy: {grid.best_score_:.4f}")
+
+        if grid.best_score_ > best_overall_score:
+            best_overall_score = grid.best_score_
+            best_overall = grid.best_estimator_
+            best_overall_name = name
+
+    print("\n" + "-" * 60)
+    print(f"Best model for dataset {dataset_id}: {best_overall_name}")
+    print(f"Best CV accuracy: {best_overall_score:.4f}")
+
+    # Refit is already done on full training data inside GridSearchCV for best params,
+    # but to be explicit we can refit the chosen best model
+    best_overall.fit(X_train, y_train)
+
+    # Predict on test data
+    y_pred = best_overall.predict(X_test)
 
     # Save predictions
     save_predictions(y_pred, dataset_id)
