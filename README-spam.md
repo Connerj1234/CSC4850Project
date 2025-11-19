@@ -152,27 +152,28 @@ This process ensures each model is evaluated fairly on the same folds.
 
 ## **6. Results**
 
-*This section will be updated after running `main_spam.py` and gathering final cross validated F1 scores.*
+After running the full pipeline on both training datasets (combined total of **4,296 messages**), each model was evaluated using 5-fold stratified cross validation with **F1 score** as the selection metric.
 
-The script prints, for each model:
+The following table summarizes the best hyperparameters and cross validated F1 scores for each model:
 
-* Best parameters
-* Best CV F1 score
+| Model       | Best Hyperparameters                                                | Best CV F1 Score |
+|-------------|---------------------------------------------------------------------|------------------|
+| Logistic Regression | `C = 0.5`, `word_min_df = 2`, `char_min_df = 5`            | **0.9547**       |
+| Linear SVM (LinearSVC) | `C = 0.5`, `word_min_df = 5`, `char_min_df = 2`         | **0.9571**       |
+| Complement Naive Bayes | `alpha = 0.5`, `word_min_df = 2`, `char_min_df = 2`     | **0.9197**       |
+| Multinomial Naive Bayes | `alpha = 0.5`, `word_min_df = 2`, `char_min_df = 5`    | **0.9464**       |
 
-and selects the strongest-performing model.
+### **Selected Model**
 
-Example (placeholder format):
+The highest performing model was:
 
-| Model  | Best Params | Best CV F1 |
-| ------ | ----------- | ---------- |
-| logreg | `{...}`     | 0.93       |
-| linsvm | `{...}`     | 0.95       |
-| cnb    | `{...}`     | 0.88       |
-| mnb    | `{...}`     | 0.86       |
+### ⭐ **Linear SVM (LinearSVC)**
+with a **cross validated F1 score of 0.9571**.
 
-**Selected model:** LinearSVM (example)
+This model demonstrated strong performance on sparse TF-IDF features and handled the class imbalance effectively using balanced class weights.
 
-The selected model is then retrained on all combined training data.
+The selected model was then retrained on **100% of the combined training data** and used to generate the final predictions for the test set.
+
 
 ---
 
@@ -225,8 +226,10 @@ This executes the full pipeline:
 
 The spam detection task demonstrates a complete text classification workflow:
 
-* Data loading, normalization, and cleaning
-* Feature engineering using TF-IDF
-* Comparison of four classic text classification models
-* Data-driven model selection using cross validated F1 score
-* Final predictions produced according to project specifications
+- Loading and merging two training datasets
+- Cleaning messages by replacing URLs, phone numbers, removing punctuation, and normalizing text
+- Building TF-IDF features using both word-level and character-level n-grams
+- Evaluating four classic text classification models using 5-fold cross validation
+- Selecting the best model based on F1 score
+
+Based on cross validated F1 performance, **LinearSVM** was selected as the final model for spam detection, achieving a CV F1 score of **0.9571**. The final predictions were generated and saved according to the project requirements.
